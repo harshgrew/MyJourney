@@ -245,7 +245,7 @@ h1.brand .grad{
 .field{margin-bottom:17px;}
 .field label{display:block;font-size:.78rem;font-weight:600;margin-bottom:8px;color:#aab3d6;letter-spacing:.03em;}
 .field label .opt{font-weight:400;color:#5d6a94;}
-.field input[type=text],.field input[type=datetime-local],.field textarea{
+.field input[type=text],.field input[type=datetime-local],.field input[type=password],.field textarea{
   width:100%;background:rgba(255,255,255,.05);border:1px solid var(--stroke);border-radius:13px;
   padding:13px 15px;font-size:.92rem;color:var(--text);font-family:'Inter',sans-serif;resize:vertical;
   transition:border-color .2s,box-shadow .2s;color-scheme:dark;
@@ -265,6 +265,20 @@ h1.brand .grad{
 
 .img-viewer{max-width:100%;max-height:66vh;border-radius:16px;display:block;margin:14px auto 0;box-shadow:0 16px 44px rgba(0,0,0,.5);}
 
+/* password lock modal */
+.lock-wrap{text-align:center;padding:8px 0 2px;}
+.lock-ic{
+  width:70px;height:70px;border-radius:50%;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;
+  font-size:1.9rem;background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.35);
+  box-shadow:0 0 40px rgba(255,107,107,.15);
+}
+.lock-wrap .pw-input{
+  text-align:center;letter-spacing:.35em;font-size:1.15rem;font-weight:600;
+}
+.shake{animation:shake .4s;}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-9px)}40%{transform:translateX(9px)}60%{transform:translateX(-6px)}80%{transform:translateX(6px)}}
+.pw-err{color:var(--red);font-size:.8rem;margin-top:10px;min-height:1em;}
+
 /* toast */
 .toast{
   position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(90px);
@@ -275,6 +289,7 @@ h1.brand .grad{
 .toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
 .toast.err{border-color:rgba(255,107,107,.5);}
 </style>
+<base target="_blank">
 <base target="_blank">
 </head>
 <body>
@@ -422,6 +437,26 @@ h1.brand .grad{
   </div>
 </div>
 
+<!-- ======== PASSWORD LOCK MODAL ======== -->
+<div class="overlay hidden" id="lockModal" onclick="if(event.target===this)closeModal('lockModal')">
+  <div class="modal" style="max-width:400px;" id="lockModalBox">
+    <div class="lock-wrap">
+      <div class="lock-ic">🔒</div>
+      <h3>Password Required</h3>
+      <p class="msub" id="lockSub">Enter password to delete this item.</p>
+      <div class="field" style="text-align:left;">
+        <label>PASSWORD</label>
+        <input type="password" id="pwInput" class="pw-input" placeholder="••••••" autocomplete="off">
+      </div>
+      <div class="pw-err" id="pwErr"></div>
+      <div class="modal-actions" style="justify-content:center;">
+        <button class="btn btn-ghost" onclick="closeModal('lockModal')">Cancel</button>
+        <button class="btn btn-red" onclick="submitPw()">Unlock &amp; Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -430,6 +465,9 @@ const DB={
   set(k,v){try{localStorage.setItem('mj_'+k,JSON.stringify(v))}catch(e){toast('⚠️ Storage full — delete old items',true)}}
 };
 let details=DB.get('details'), docs=DB.get('docs');
+
+/* 🔑 DELETE PASSWORD — change it here anytime */
+const DELETE_PASSWORD = 'Y2027';
 
 function showView(id){
   ['homeView','detailsView','docsView'].forEach(v=>document.getElementById(v).classList.add('hidden'));
@@ -499,10 +537,45 @@ function viewProof(id){
     viewerModal.classList.remove('hidden');
   }
 }
+
+/* ---------- 🔒 Password-protected delete ---------- */
+let pendingDelete=null; // {type:'detail'|'doc', id}
+
+function requestDelete(type,id,label){
+  pendingDelete={type,id};
+  pwInput.value=''; pwErr.textContent='';
+  lockSub.textContent='Enter password to delete: '+label;
+  lockModal.classList.remove('hidden');
+  setTimeout(()=>pwInput.focus(),120);
+}
+function submitPw(){
+  if(pwInput.value!==DELETE_PASSWORD){
+    pwErr.textContent='❌ Wrong password — try again';
+    const box=document.getElementById('lockModalBox');
+    box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
+    pwInput.value=''; pwInput.focus();
+    return;
+  }
+  const p=pendingDelete; pendingDelete=null;
+  closeModal('lockModal');
+  if(!p) return;
+  if(p.type==='detail'){
+    details=details.filter(x=>x.id!==p.id);
+    DB.set('details',details); toast('🗑️ Message deleted'); renderAll();
+  }else{
+    docs=docs.filter(x=>x.id!==p.id);
+    DB.set('docs',docs); toast('🗑️ Document deleted'); renderAll();
+  }
+}
+pwInput.addEventListener('keydown',e=>{if(e.key==='Enter')submitPw()});
+
 function deleteDetail(id){
-  if(!confirm('Delete this message?'))return;
-  details=details.filter(x=>x.id!==id);
-  DB.set('details',details); toast('🗑️ Deleted'); renderAll();
+  const d=details.find(x=>x.id===id);
+  requestDelete('detail',id,'this message');
+}
+function deleteDoc(id){
+  const d=docs.find(x=>x.id===id);
+  requestDelete('doc',id,'“'+(d?d.name:'this document')+'”');
 }
 
 /* Open a data-URL file (image/pdf) in a new tab without any HTML strings */
@@ -549,11 +622,6 @@ function viewDoc(id){
   const d=docs.find(x=>x.id===id); if(!d)return;
   if(!openDataUrl(d.data)) toast('⚠️ Pop-up blocked — allow pop-ups',true);
 }
-function deleteDoc(id){
-  if(!confirm('Delete this document?'))return;
-  docs=docs.filter(x=>x.id!==id);
-  DB.set('docs',docs); toast('🗑️ Deleted'); renderAll();
-}
 
 /* ---------- Render ---------- */
 function renderAll(){
@@ -591,11 +659,11 @@ function renderAll(){
       </div>`).join('');
 }
 
-['detailsModal','docsModal'].forEach(id=>{
+['detailsModal','docsModal','lockModal'].forEach(id=>{
   document.getElementById(id).addEventListener('click',function(e){if(e.target===this)closeModal(id)});
 });
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape')['detailsModal','docsModal','viewerModal'].forEach(closeModal);
+  if(e.key==='Escape')['detailsModal','docsModal','viewerModal','lockModal'].forEach(closeModal);
 });
 
 renderAll();
